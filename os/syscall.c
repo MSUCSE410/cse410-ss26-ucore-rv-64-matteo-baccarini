@@ -40,9 +40,14 @@ uint64 sys_gettimeofday(TimeVal *val, int _tz) // TODO: implement sys_gettimeofd
 
 	/* The code in `ch3` will leads to memory bugs*/
 
-	// uint64 cycle = get_cycle();
-	// val->sec = cycle / CPU_FREQ;
-	// val->usec = (cycle % CPU_FREQ) * 1000000 / CPU_FREQ;
+	pagetable_t current_proc = curr_proc()->pagetable;
+
+	TimeVal * physical_val = (TimeVal *)useraddr(current_proc, (uint64)val);
+
+
+	uint64 cycle = get_cycle();
+	physical_val->sec = cycle / CPU_FREQ;
+	physical_val->usec = (cycle % CPU_FREQ) * 1000000 / CPU_FREQ;
 	return 0;
 }
 
@@ -55,13 +60,14 @@ uint64 sys_gettimeofday(TimeVal *val, int _tz) // TODO: implement sys_gettimeofd
 
 uint64 sys_task_info(struct TaskInfo *info) {
 	struct proc * p = curr_proc();
-	info->status = Running;
+	TaskInfo * physical_info = (TaskInfo *)useraddr(p->pagetable, (uint64)info);
+	physical_info->status = Running;
 	for (int i = 0; i < MAX_SYSCALL_NUM; i++) {
-		info->syscall_times[i] = p->syscall_times[i];
+		physical_info->syscall_times[i] = p->syscall_times[i];
 	}
 	uint64 cycle = get_cycle();
 	uint64 running_time = cycle - p->time;
-	info->time = (running_time * 1000) / CPU_FREQ; // ms
+	physical_info->time = (running_time * 1000) / CPU_FREQ; // ms
 	return 0;
 }
 
