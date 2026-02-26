@@ -127,7 +127,6 @@ uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd)
 		// Clear the allocated page
 		memset(pa, 0, PGSIZE);
 		
-		// Map the page
 		if (mappages(p->pagetable, va, PGSIZE, (uint64)pa, perm) != 0) {
 			kfree(pa);
 			return -1;
