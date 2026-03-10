@@ -165,7 +165,6 @@ uint64 sys_munmap(uint64 start, uint64 len)
 	}
 	
 	// 4. Unmap the pages and free physical memory
-	// Since we've verified all pages exist above, this should succeed
 	uvmunmap(p->pagetable, start, npages, 1);
 	
 	return 0;
