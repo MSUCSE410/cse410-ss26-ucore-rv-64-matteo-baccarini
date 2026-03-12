@@ -53,26 +53,28 @@ int allocpid()
 // If there are no free procs, or a memory allocation fails, return 0.
 struct proc *allocproc(void)
 {
-	struct proc *p;
-	for (p = pool; p < &pool[NPROC]; p++) {
-		if (p->state == UNUSED) {
-			goto found;
-		}
-	}
-	return 0;
+    struct proc *p;
+    for (p = pool; p < &pool[NPROC]; p++) {
+        if (p->state == UNUSED) {
+            goto found;
+        }
+    }
+    return 0;
 
 found:
-	p->pid = allocpid();
-	p->state = USED;
-	p->pagetable = 0;
-	p->ustack = 0;
-	p->max_page = 0;
-	memset(&p->context, 0, sizeof(p->context));
-	memset((void *)p->kstack, 0, KSTACK_SIZE);
-	memset((void *)p->trapframe, 0, TRAP_PAGE_SIZE);
-	p->context.ra = (uint64)usertrapret;
-	p->context.sp = p->kstack + KSTACK_SIZE;
-	return p;
+    p->pid = allocpid();
+    p->state = USED;
+    p->pagetable = 0;
+    p->ustack = 0;
+    p->max_page = 0;
+    p->time = 0;  // ADD THIS
+    memset(p->syscall_times, 0, sizeof(p->syscall_times));  // ADD THIS
+    memset(&p->context, 0, sizeof(p->context));
+    memset((void *)p->kstack, 0, KSTACK_SIZE);
+    memset((void *)p->trapframe, 0, TRAP_PAGE_SIZE);
+    p->context.ra = (uint64)usertrapret;
+    p->context.sp = p->kstack + KSTACK_SIZE;
+    return p;
 }
 
 // Scheduler never returns.  It loops, doing:

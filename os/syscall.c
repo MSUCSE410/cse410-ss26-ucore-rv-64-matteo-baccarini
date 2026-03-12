@@ -33,23 +33,18 @@ uint64 sys_sched_yield()
 	return 0;
 }
 
-uint64 sys_gettimeofday(TimeVal *val, int _tz) // TODO: implement sys_gettimeofday in pagetable. (VA to PA)
+uint64 sys_gettimeofday(TimeVal *val, int _tz)
 {
-	// YOUR CODE
-	val->sec = 0;
-	val->usec = 0;
-
-	/* The code in `ch3` will leads to memory bugs*/
-
-	pagetable_t current_proc = curr_proc()->pagetable;
-
-	TimeVal * physical_val = (TimeVal *)useraddr(current_proc, (uint64)val);
-
-
-	uint64 cycle = get_cycle();
-	physical_val->sec = cycle / CPU_FREQ;
-	physical_val->usec = (cycle % CPU_FREQ) * 1000000 / CPU_FREQ;
-	return 0;
+    pagetable_t pagetable = curr_proc()->pagetable;
+    TimeVal *physical_val = (TimeVal *)useraddr(pagetable, (uint64)val);
+    
+    if (physical_val == 0)
+        return -1;
+    
+    uint64 cycle = get_cycle();
+    physical_val->sec = cycle / CPU_FREQ;
+    physical_val->usec = (cycle % CPU_FREQ) * 1000000 / CPU_FREQ;
+    return 0;
 }
 
 // TODO: add support for mmap and munmap syscall.
@@ -106,7 +101,7 @@ uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd)
 	// port bit 1 = writable -> PTE_W (bit 2)
 	// port bit 2 = executable -> PTE_X (bit 3)
 	// Also need PTE_U (bit 4) for user access and PTE_V (bit 0) for valid
-	int perm = PTE_U | PTE_V;
+	int perm = PTE_U;
 	if (port & 0x1) perm |= PTE_R;
 	if (port & 0x2) perm |= PTE_W;
 	if (port & 0x4) perm |= PTE_X;
@@ -175,16 +170,17 @@ uint64 sys_munmap(uint64 start, uint64 len)
 */
 
 uint64 sys_task_info(struct TaskInfo *info) {
-	struct proc * p = curr_proc();
-	struct TaskInfo *physical_info = (struct TaskInfo *)useraddr(p->pagetable, (uint64)info);
-	physical_info->status = Running;
-	for (int i = 0; i < MAX_SYSCALL_NUM; i++) {
-		physical_info->syscall_times[i] = p->syscall_times[i];
-	}
-	uint64 cycle = get_cycle();
-	uint64 running_time = cycle - p->time;
-	physical_info->time = (running_time * 1000) / CPU_FREQ; // ms
-	return 0;
+    struct proc *p = curr_proc();
+    struct TaskInfo *physical_info = (struct TaskInfo *)useraddr(p->pagetable, (uint64)info);
+    physical_info->status = Running;
+    for (int i = 0; i < MAX_SYSCALL_NUM; i++) {
+        physical_info->syscall_times[i] = p->syscall_times[i];
+    }
+    uint64 current_cycle = get_cycle();
+    uint64 elapsed_cycles = current_cycle - p->time;
+    // Avoid overflow: divide first, then multiply
+    physical_info->time = (elapsed_cycles + (CPU_FREQ / 1000) - 1) / (CPU_FREQ / 1000);
+    return 0;
 }
 
 extern char trap_page[];
@@ -207,6 +203,9 @@ void syscall()
 		// __builtin_unreachable();
 	case SYS_sched_yield:
 		ret = sys_sched_yield();
+		break;
+	case SYS_getpid:
+		ret = curr_proc()->pid;
 		break;
 	case SYS_gettimeofday:
 		ret = sys_gettimeofday((TimeVal *)args[0], args[1]);
