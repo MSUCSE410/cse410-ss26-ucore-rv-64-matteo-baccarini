@@ -4,6 +4,7 @@
 #include "trap.h"
 #include "vm.h"
 #include "queue.h"
+#include "timer.h"
 
 struct proc pool[NPROC];
 __attribute__((aligned(16))) char kstack[NPROC][PAGE_SIZE];
@@ -32,6 +33,7 @@ void proc_init()
 		p->state = UNUSED;
 		p->kstack = (uint64)kstack[p - pool];
 		p->trapframe = (struct trapframe *)trapframe[p - pool];
+		p->startcycle = 0;
 	}
 	idle.kstack = (uint64)boot_stack_top;
 	idle.pid = IDLE_PID;
@@ -89,6 +91,10 @@ found:
 	memset((void *)p->trapframe, 0, TRAP_PAGE_SIZE);
 	p->context.ra = (uint64)usertrapret;
 	p->context.sp = p->kstack + KSTACK_SIZE;
+	p->startcycle = 0;
+	p->prio = 16;
+	p->stride = 0;
+	p->pass = BIG_STRIDE / 16;
 	return p;
 }
 
@@ -99,30 +105,29 @@ found:
 //    via swtch back to the scheduler.
 void scheduler()
 {
-	struct proc *p;
-	for (;;) {
-		/*int has_proc = 0;
-		for (p = pool; p < &pool[NPROC]; p++) {
-			if (p->state == RUNNABLE) {
-				has_proc = 1;
-				tracef("swtich to proc %d", p - pool);
-				p->state = RUNNING;
-				current_proc = p;
-				swtch(&idle.context, &p->context);
-			}
-		}
-		if(has_proc == 0) {
-			panic("all app are over!\n");
-		}*/
-		p = fetch_task();
-		if (p == NULL) {
-			panic("all app are over!\n");
-		}
-		tracef("swtich to proc %d", p - pool);
-		p->state = RUNNING;
-		current_proc = p;
-		swtch(&idle.context, &p->context);
-	}
+    struct proc *p;
+    for (;;) {
+        // Find the RUNNABLE process with the smallest stride
+        struct proc *min_proc = NULL;
+        for (p = pool; p < &pool[NPROC]; p++) {
+            if (p->state == RUNNABLE) {
+                if (min_proc == NULL || p->stride < min_proc->stride) {
+                    min_proc = p;
+                }
+            }
+        }
+        if (min_proc == NULL) {
+            panic("all app are over!\n");
+        }
+        p = min_proc;
+        // Update stride before running
+        p->stride += p->pass;
+        tracef("swtich to proc %d", p - pool);
+        p->state = RUNNING;
+        current_proc = p;
+        if (p->startcycle == 0) p->startcycle = get_cycle();
+        swtch(&idle.context, &p->context);
+    }
 }
 
 // Switch to scheduler.  Must hold only p->lock
@@ -143,9 +148,8 @@ void sched()
 // Give up the CPU for one scheduling round.
 void yield()
 {
-	current_proc->state = RUNNABLE;
-	add_task(current_proc);
-	sched();
+    current_proc->state = RUNNABLE;
+    sched();
 }
 
 // Free a process's page table, and free the
@@ -226,7 +230,6 @@ int wait(int pid, int *code)
 			return -1;
 		}
 		p->state = RUNNABLE;
-		add_task(p);
 		sched();
 	}
 }
@@ -250,4 +253,38 @@ void exit(int code)
 		}
 	}
 	sched();
+}
+
+int setpriority(long long prio)
+{
+    if (prio < 2)
+        return -1;
+    struct proc *p = curr_proc();
+    p->prio = prio;
+    p->pass = BIG_STRIDE / prio;
+    return prio;
+}
+
+
+void get_taskinfo(TaskInfo *info)
+{
+	struct proc *p = curr_proc();
+	info->time = (get_cycle() - p->startcycle) / (CPU_FREQ / 1000);
+	info->status = Running;
+	memmove(info->syscall_times, p->syscall, sizeof(p->syscall));
+}
+
+int spawn(char *name)
+{
+    int id = get_id_by_name(name);
+    if (id < 0)
+        return -1;
+    struct proc *np = allocproc();
+    if (np == 0)
+        return -1;
+    np->parent = curr_proc();
+    if (loader(id, np) < 0)
+        return -1;
+    add_task(np);
+    return np->pid;
 }
