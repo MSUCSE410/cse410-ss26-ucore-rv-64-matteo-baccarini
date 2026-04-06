@@ -4,6 +4,7 @@
 #include "trap.h"
 #include "vm.h"
 #include "queue.h"
+#include "timer.h"
 
 struct proc pool[NPROC];
 __attribute__((aligned(16))) char kstack[NPROC][PAGE_SIZE];
@@ -37,6 +38,7 @@ void proc_init()
 		p->state = UNUSED;
 		p->kstack = (uint64)kstack[p - pool];
 		p->trapframe = (struct trapframe *)trapframe[p - pool];
+		p->startcycle = 0;
 	}
 	idle.kstack = (uint64)boot_stack_top;
 	idle.pid = IDLE_PID;
@@ -96,6 +98,11 @@ found:
 	memset((void *)p->files, 0, sizeof(struct file *) * FD_BUFFER_SIZE);
 	p->context.ra = (uint64)usertrapret;
 	p->context.sp = p->kstack + KSTACK_SIZE;
+	// stride scheduling fields (from ch5)
+	p->startcycle = 0;
+	p->prio = 16;
+	p->stride = 0;
+	p->pass = BIG_STRIDE / 16;
 	return p;
 }
 
@@ -119,26 +126,25 @@ void scheduler()
 {
 	struct proc *p;
 	for (;;) {
-		/*int has_proc = 0;
+		// Find the RUNNABLE process with the smallest stride (from ch5)
+		struct proc *min_proc = NULL;
 		for (p = pool; p < &pool[NPROC]; p++) {
 			if (p->state == RUNNABLE) {
-				has_proc = 1;
-				tracef("swtich to proc %d", p - pool);
-				p->state = RUNNING;
-				current_proc = p;
-				swtch(&idle.context, &p->context);
+				if (min_proc == NULL || p->stride < min_proc->stride) {
+					min_proc = p;
+				}
 			}
 		}
-		if(has_proc == 0) {
-			panic("all app are over!\n");
-		}*/
-		p = fetch_task();
-		if (p == NULL) {
+		if (min_proc == NULL) {
 			panic("all app are over!\n");
 		}
+		p = min_proc;
+		// Update stride before running
+		p->stride += p->pass;
 		tracef("swtich to proc %d", p - pool);
 		p->state = RUNNING;
 		current_proc = p;
+		if (p->startcycle == 0) p->startcycle = get_cycle();
 		swtch(&idle.context, &p->context);
 	}
 }
@@ -180,7 +186,7 @@ void freeproc(struct proc *p)
 	if (p->pagetable)
 		freepagetable(p->pagetable, p->max_page);
 	p->pagetable = 0;
-	for (int i = 0; i > FD_BUFFER_SIZE; i++) {
+	for (int i = 0; i < FD_BUFFER_SIZE; i++) {
 		if (p->files[i] != NULL) {
 			fileclose(p->files[i]);
 		}
@@ -205,7 +211,6 @@ int fork()
 	// Copy file table to new proc
 	for (i = 0; i < FD_BUFFER_SIZE; i++) {
 		if (p->files[i] != NULL) {
-			// TODO: f->type == STDIO ?
 			p->files[i]->ref++;
 			np->files[i] = p->files[i];
 		}
@@ -252,7 +257,6 @@ int push_argv(struct proc *p, char **argv)
 	}
 	p->trapframe->a1 = sp;
 	p->trapframe->sp = sp;
-	// clear files ?
 	return argc; // this ends up in a0, the first argument to main(argc, argv)
 }
 
@@ -335,4 +339,40 @@ int fdalloc(struct file *f)
 		}
 	}
 	return -1;
+}
+
+// Set priority for stride scheduling (from ch5)
+int setpriority(long long prio)
+{
+	if (prio < 2)
+		return -1;
+	struct proc *p = curr_proc();
+	p->prio = prio;
+	p->pass = BIG_STRIDE / prio;
+	return prio;
+}
+
+// Get task info (from ch5)
+void get_taskinfo(TaskInfo *info)
+{
+	struct proc *p = curr_proc();
+	info->time = (get_cycle() - p->startcycle) / (CPU_FREQ / 1000);
+	info->status = Running;
+	memmove(info->syscall_times, p->syscall, sizeof(p->syscall));
+}
+
+// Spawn a new process by name (from ch5)
+int spawn(char *name)
+{
+	int id = get_id_by_name(name);
+	if (id < 0)
+		return -1;
+	struct proc *np = allocproc();
+	if (np == 0)
+		return -1;
+	np->parent = curr_proc();
+	if (loader(id, np) < 0)
+		return -1;
+	add_task(np);
+	return np->pid;
 }
