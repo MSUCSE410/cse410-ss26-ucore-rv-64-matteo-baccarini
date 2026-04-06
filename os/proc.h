@@ -3,11 +3,15 @@
 
 #include "riscv.h"
 #include "types.h"
+#include "queue.h"
 
 #define NPROC (512)
 #define FD_BUFFER_SIZE (16)
+#define BIG_STRIDE (65536)
 
 struct file;
+
+#include "const.h"
 
 // Saved registers for kernel context switches.
 struct context {
@@ -43,11 +47,29 @@ struct proc {
 	uint64 max_page;
 	struct proc *parent; // Parent process
 	uint64 exit_code;
-	struct file *files
-		[FD_BUFFER_SIZE]; //File descriptor table, using to record the files opened by the process
+	struct file *files[FD_BUFFER_SIZE]; // File descriptor table
+	uint64 prio;
+	uint64 pass;
+	uint64 stride;
+	uint32 syscall[MAX_SYSCALL_NUM];
+	uint64 startcycle;
 };
 
 int cpuid();
+
+typedef enum {
+	UnInit,
+	Ready,
+	Running,
+	Exited,
+} TaskStatus;
+
+typedef struct {
+	TaskStatus status;
+	unsigned int syscall_times[MAX_SYSCALL_NUM];
+	int time;
+} TaskInfo;
+
 struct proc *curr_proc();
 void exit(int);
 void proc_init();
@@ -63,6 +85,9 @@ struct proc *allocproc();
 int fdalloc(struct file *);
 int init_stdio(struct proc *);
 int push_argv(struct proc *, char **);
+void get_taskinfo(TaskInfo *info);
+int spawn(char *name);
+int setpriority(long long prio);
 // swtch.S
 void swtch(struct context *, struct context *);
 
