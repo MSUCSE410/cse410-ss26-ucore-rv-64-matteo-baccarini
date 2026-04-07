@@ -4,14 +4,13 @@
 #include "riscv.h"
 #include "types.h"
 #include "queue.h"
+#include "const.h"
 
 #define NPROC (512)
 #define FD_BUFFER_SIZE (16)
 #define BIG_STRIDE (65536)
 
 struct file;
-
-#include "const.h"
 
 // Saved registers for kernel context switches.
 struct context {

@@ -126,19 +126,10 @@ void scheduler()
 {
 	struct proc *p;
 	for (;;) {
-		// Find the RUNNABLE process with the smallest stride (from ch5)
-		struct proc *min_proc = NULL;
-		for (p = pool; p < &pool[NPROC]; p++) {
-			if (p->state == RUNNABLE) {
-				if (min_proc == NULL || p->stride < min_proc->stride) {
-					min_proc = p;
-				}
-			}
-		}
-		if (min_proc == NULL) {
+		p = fetch_task();
+		if (p == NULL) {
 			panic("all app are over!\n");
 		}
-		p = min_proc;
 		// Update stride before running
 		p->stride += p->pass;
 		tracef("swtich to proc %d", p - pool);
@@ -361,18 +352,24 @@ void get_taskinfo(TaskInfo *info)
 	memmove(info->syscall_times, p->syscall, sizeof(p->syscall));
 }
 
-// Spawn a new process by name (from ch5)
+// Spawn a new process by name (from ch5, updated for ch6 filesystem)
 int spawn(char *name)
 {
-	int id = get_id_by_name(name);
-	if (id < 0)
+	struct inode *ip = namei(name);
+	if (ip == 0)
 		return -1;
 	struct proc *np = allocproc();
-	if (np == 0)
+	if (np == 0) {
+		iput(ip);
 		return -1;
+	}
 	np->parent = curr_proc();
-	if (loader(id, np) < 0)
+	if (bin_loader(ip, np) < 0) {
+		iput(ip);
+		freeproc(np);
 		return -1;
+	}
+	iput(ip);
 	add_task(np);
 	return np->pid;
 }
